@@ -1,0 +1,162 @@
+---
+title: "Practical 5"
+author: "Conor O'Donoghue"
+date: "April 30, 2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Part A: Inferring Clonal Mutations
+## 1. Install and load PureCN
+```{r, eval=FALSE}
+install.packages("BiocManager")
+```
+```{r, message=FALSE, eval=FALSE}
+BiocManager::install("PureCN")
+```
+
+
+```{r, message=FALSE}
+library("PureCN")
+```
+
+## 2. Set file variables
+```{r}
+normal.coverage.file <- system.file("extdata","example_normal.txt",package="PureCN")
+normal2.coverage.file <- system.file("extdata","example_normal2.txt",package="PureCN")
+normal.coverage.files <-c(normal.coverage.file, normal2.coverage.file)
+tumor.coverage.file <-system.file("extdata", "example_tumor.txt",     package = "PureCN") 
+seg.file <-system.file("extdata", "example_seg.txt",    package = "PureCN")
+vcf.file <-system.file("extdata", "example.vcf.gz", package = "PureCN")
+interval.file <-system.file("extdata", "example_intervals.txt",     package = "PureCN")
+```
+
+## 3. GC normalize the coverage for the sample
+```{r}
+correctCoverageBias(normal.coverage.file,interval.file,
+                    output.file = "example_normal_loess.txt",
+                    plot.bias=TRUE)
+```
+
+*What is the importance of GC normalizing the data?*
+GC content introduces bias to the data, as the read/fragment abundance depends on GC content. 
+In normalizing by GC content, we remove this bias from the data and get closer to the true values.
+
+## 4. Create a normal database
+```{r}
+normalDB <- createNormalDatabase(normal.coverage.files)
+pool <- calculateTangentNormal(tumor.coverage.file, normalDB)
+```
+
+*What is the advantage of using a normal database?*
+By using normals to compare the input to, we can normalize and thus denoise the input data.
+PureCN's calculateTangentNormal function is a reimplementation of GATK's method,
+so the same logic for using a panel of normals in the Mutect2 practical applies here too.
+
+## 5. Normalize, segment, and determine purity and ploidy for the sample
+```{r, warning=FALSE, message=FALSE}
+ret <- runAbsoluteCN(normal.coverage.file = pool, 
+              tumor.coverage.file = tumor.coverage.file,
+              vcf.file = vcf.file, genome="hg19", sampleid="Sample1",
+              interval.file = interval.file, normalDB=normalDB,
+              post.optimize = FALSE, plot.cnv=FALSE, verbose=FALSE)
+```
+### 5a) Why do you think PureCN requires dbSNP annotation?
+dbSNP is a public database run by NCBI with the goal of containing all identified human genetic variation.
+With a database of all known SNPs, one would be able to verify variants.
+According to the paper in which pureCN was published, this is what they use dbSNP for:
+comparison to known germline variants are used to help verify borderline cases (P>0.001)
+during segmentation, and dbSNP and COSMIC databases are used to calculate prior probabilities for SNVs
+being somatic if a matched normal is unavailable.
+
+## 6. Produce a plot for finding the correct purity and ploidy combinations in the results.
+```{r}
+plotAbs(ret, type="overview")
+```
+
+*From the plot what do you think are the most likely values for purity and ploidy for this sample?*
+The colors in the heatmap indicate the log-likelihood score of the copy number fitting to each purity and ploidy combination,
+and the numbers on the plot indicate locations of local optima and note their final rank.
+Rank number 1 is located at just under 2 ploidy and just over 0.6 purity, which correspond to the most likely values for this sample.
+
+## 7. Plot a histogram of tumor vs normal copy number log 2 ratios for the maximum likelihood estimation
+```{r}
+plotAbs(ret, 1, type="hist")
+```
+
+### 7a) How much of the genome has a diploid copy number?
+Roughly adding up the bars around 2, about 60% of the genome has a diploid copy number.
+
+### 7b) How much of the genome has a copy number of 1?
+Using a similar method, one can estimate the percentage of the genome having a copy number of 1 to be 30%.
+
+### 7c) How much of the genome has a copy number of 3?
+While there is some portion of the genome that appears to have a copy number of 4, 
+there doesn't appear to be any portion of the genome that has a copy number of 3.
+
+## 8. Use the predictSomatic to extract the SNV posterior probabilities for all possible states and save the results to a vcf file
+```{r}
+pred_ret <- predictSomatic(ret)
+```
+
+## 9. From the results of predictSomatic, use the CELLFRACTION columns to determine if a population is clonal or subclonal.
+
+```{r}
+head(pred_ret)
+pred_ret$CELLFRACTION
+pred_ret$CELLFRACTION.95.UPPER
+```
+
+It appears that both for CELLFRACTION and CELLFRACTION.95.UPPER, all of the rows contain NA values except for one row,
+which has a value of 1.
+I don't know why the other values are NA instead of some value less than 1, but I infer this to mean that that one
+row is a clonal mutation, and the rest are subclonal.
+This can be found programmatically with the following code:
+
+```{r, eval=FALSE}
+clonal = pred_ret[which(pred_ret$CELLFRACTION.95.UPPER == 1),]
+num_clonal = nrow(clonal)
+num_subclonal = nrow(pred_ret) - num_clonal
+print(paste(c("Clonal mutations: ", num_clonal), collapse=""))
+print(paste(c("Subclonal mutations: ", num_subclonal), collapse=""))
+```
+
+\newpage
+# Part B: Test for a Neutral Evolutionary Model in Cancer Sequencing Data
+## 2. Install and Load Packages
+```{r, eval=FALSE}
+BiocManager::install("VariantAnnotation")
+install.packages("neutralitytestr")
+```
+
+```{r}
+library(VariantAnnotation)
+library(neutralitytestr)
+```
+
+## 3. Read in VCF and extract genotype information
+```{r}
+vcf <- readVcf("TCRBOA3_T_WEX_T_N.filtered.vcf.gz")
+g=geno(vcf)
+```
+
+## 4. Perform a test for neutral evolution on the vcf file from the TCRBOA3 sample
+```{r}
+afv = unlist(g$AF[,2])
+s <- neutralitytest(afv, fmin=0.1, fmax=0.4)
+print(s)
+plot_all(s)
+```
+
+### 4a) Comment on the choice of fmax for this analysis.
+Looking at the histogram, it appears that the majority of mutations fall at or below an allelic frequency of 0.4, so the 
+choice of 0.4 for the fmax appears to be appropriate.
+
+### 4b) Is there evidence of positive selection acting on the subclonal mutations?
+Although it's a bit hard to tell, it appears that the data fits the neutral model. 
+If this is the case, then there is not evidence of positive selection acting on the subclonal mutations.

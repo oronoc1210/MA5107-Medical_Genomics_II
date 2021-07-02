@@ -1,0 +1,96 @@
+---
+title: "Practical 2 - Maftools"
+author: "Conor O'Donoghue"
+date: "March 5, 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Install the Bioconductor package maftools
+
+```{r install maftools, eval=FALSE}
+BiocManager::install("maftools")
+```
+
+```{r load maftools, message=FALSE}
+library(maftools)
+```
+
+
+# 2. Read the maf format somatic variants into a maftools object.
+
+```{r read.maf}
+laml = read.maf('somatic.mafplus')
+laml
+```
+
+# 3. 
+## a) How many mutations are there in this dataset?
+According to the summary table, the total of all mutations is 760.
+
+## b) How many genes are affected?
+Again according to the summary table, 483 genes were affected.
+
+
+# 4. 
+## a) Produce a mafSummary plot
+```{r plotmafSummary}
+plotmafSummary(maf = laml, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+```
+
+
+## b) What is the most mutated gene?
+According to the plot, MUC4 is the most mutated gene, with just under 30 mutations.
+
+
+# 5. Investigate whether there is any known association between the gene in step 4 and pancreatic cancer.
+According to genecards (https://www.genecards.org/cgi-bin/carddisp.pl?gene=MUC4), 
+MUC4 is a gene that codes for an integral membrane glycoprotein, and thus has function in cell adhesion. The UniProtKB summary of the gene states that it may play a role in tumor progression, and promotes tumor growth mainly due to repression of apoptosis. The page includes mRNA expression of MUC4 by UniProt/SwissProt, which found that it was minimally or not expressed in normal pancreas or chronic pancreatitis, but was found to be highly expressed in pancreatic tumors and pancreatic tumor cell lines.
+
+# 6. Produce a lollipop plot for MUC4 in the pancreatic samples.
+```{r lollipopPlot}
+lollipopPlot(maf = laml, gene = 'MUC4', AACol = 'AAChange', showMutationRate = TRUE)
+```
+
+# 7.
+## a) Produce a plot of mutation types using plotTiTv.
+```{r plotTiTv}
+laml.titv = titv(maf = laml, plot = FALSE, useSyn = TRUE)
+#plot titv summary
+plotTiTv(res = laml.titv)
+```
+
+
+## b) Which mutation type is  most common in the pancreatic samples?
+Transitions were found to be more common than transversions, with T->C being the most common mutation type.
+
+
+# 8. How does the mutation rate per Mb in the Texas samples compare to the rate in the TCGA cohorts? Produce a plot to illustrate this comparison.
+```{r tcgaCompare}
+laml.mutload = tcgaCompare(maf = laml, cohortName = 'Texas', logscale = TRUE, capture_size = 50)
+```
+The mutation rate appears to be around the middle compared to the TCGA cohorts -- it's not among the highest, but not among the lowest either.
+
+# 9. Are there any mutations that tend to co-occur/tend not to co-occur in the pancreatic cancer samples? Produce a plot to illustrate these.
+```{r somaticInteractions}
+somaticInteractions(maf = laml, top = 25, pvalue = c(0.05, 0.1))
+```
+It appears that KRTAP4-5 and KRTAP4-11 have the most significant rate of co-occurance.
+KCNN3 and ATXN1 as well as PAK2 with both FCGBP and HRNR also reached a significant p-value for co-occurance.
+
+KCNN3 and MUC4 as well as LSR and NBPF10 have a p-value below 0.1 for mutual exclusivity, but neither reach p<0.05, 
+so we ought not to conclude that any pair of genes have been shown to be mutually exclusive.
+
+# 10. Are any of the actionable variants in OnkoKB found in any of the Texas samples?
+
+```{r}
+# Can use subsetMaf and provide genes from oncokb dataframe
+oncokb = read.csv('cancerGeneList.tsv', sep='\t')
+laml_subset <- subsetMaf(maf=laml, genes=oncokb$Hugo.Symbol)
+laml_subset
+```
+
+According to the new maf object, there are 31 genes across 9 samples that would be actionable according to OnkoKB. We would now be able to use the laml_subset object to obtain any additional information about the expression of these genes in our samples.

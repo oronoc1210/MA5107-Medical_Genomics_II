@@ -1,0 +1,108 @@
+---
+title: "MA5107 Practical 3"
+author: "Conor O'Donoghue"
+date: "March 26, 2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Question 3b
+"What is the mean time between diagnosis and death for deceased patients? Compare this to the mean time between diagnosis and last follow up of the patients who remain alive."
+
+```{r}
+surv_df <- read.csv('./survival_times', sep=' ', row.names=1)
+head(surv_df)
+```
+
+```{r}
+a_df <- surv_df[which(surv_df$status==0 & !is.na(surv_df$time)),]
+d_df <- surv_df[which(surv_df$status==1 & !is.na(surv_df$time)),]
+a_mean <- mean(a_df$time)
+d_mean <- mean(d_df$time)
+a_mean
+d_mean
+```
+
+The mean time between diagnosis and death for deceased patients is 1790 days, and the mean time between diagnosis and last follow up for patients who are still alive is 1880 days.
+While the mean time is longer for the alive patients, the values are fairly close.
+
+\newpage
+# Question 4
+"How many cell types are represented in the LM22 signature matrix?"
+
+```{r}
+lm22 <- read.delim('./LM22.txt', row.names = 1)
+colnames(lm22)
+```
+
+Just wanted to open the file up as a sanity check, but as expected LM22 contains 22 cell types.
+
+# Question 5
+"Why should batch correction be performed in this case?"
+
+Not only is batch effect important for bulk RNA-seq or scRNA-seq data generally, but when the data is going to be used in a pipeline that utilizes machine learning, it's even more important to remove any confoundng factors that may have arisen from the sequencing run(s).
+
+# Question 6
+```{r}
+cibersort = read.delim('./cell_props', row.names=1)
+colnames(cibersort)
+```
+With the ID column set as the rownames, the first 22 columns are the cell types, and the last 3 are statistical measures (Pvalue, correlation, and RMSE). So when searching for the most abundant immune cell type, it's important to only search among the first 22 columns.
+
+```{r}
+max_colnum = max.col(cibersort['TCGA.EB.A44R.06A.41R.A266.07',1:22])
+max_cell_type = colnames(cibersort)[max_colnum]
+max_cell_type
+```
+
+The most abundant immune cell type in the sample is the CD8+ T cell.
+
+# Question 8
+"Designate all samples with >0.2 for the relative proportion of CD8+ T cells as CD8high and all samples with <0.2 as CD8low. Add a binary vector to the survival times table indicating for each table whether it is CD8high or not. Provide your R code."
+
+First, I'll make a new column in the cibersort dataframe that has the value 1 if the CD8 column is above 0.2, and 0 if not.
+```{r}
+cibersort$CD8high <- ifelse(cibersort$T.cells.CD8 > 0.2, 1, 0)
+head(cibersort[,c('T.cells.CD8', 'CD8high')])
+```
+
+Next, I'll merge the survival dataframe with this one by the rownames, and then subset the resulting dataframe to only contain the columns in the original survival dataframe plus the new CD8high.
+```{r}
+# Completely merge both dataframes
+surv_df_cd8high <- merge(x=surv_df, y=cibersort, by='row.names')
+# Subset columns to only include those in the original survival_df and CD8high
+surv_df_cd8high <- surv_df_cd8high[,c('time', 'status', 'CD8high')]
+head(surv_df_cd8high)
+```
+
+# Question 9
+"Use the Surv function to create a survival object and the survfit function to fit this object as a function of the CD8high binary variable."
+
+```{r}
+# load libraries
+library(survival)
+```
+
+```{r}
+surv_obj <- Surv(surv_df_cd8high$time, surv_df_cd8high$status)
+surv_fit <- survfit(surv_obj ~ surv_df_cd8high$CD8high)
+```
+
+# Question 10 
+"Plot the resulting survival curves using ggsurvplot from the survminer package."
+
+```{r, message=FALSE}
+library(survminer)
+```
+
+```{r, message=FALSE}
+survplot <- ggsurvplot(surv_fit, data=surv_df_cd8high, pval=TRUE,
+                       ggtheme=theme_bw(),legend.labs=c('CD8+ low','CD8+ high')) 
+survplot + ggtitle('Melanoma survival curve by CD8+ levels')
+```
+
+# Question 11
+With a p value of < 0.0001, there is a significant difference in survival between melanoma patients with high CD8+ and low CD8+. The plot clearly shows that patients with high CD8+ have a much higher probability of survival, so high CD8+ measurements should indicate improved prognosis.
